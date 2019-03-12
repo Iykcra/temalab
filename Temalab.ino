@@ -8,12 +8,23 @@
 #include <WebSocketsServer.h>
 #include <FS.h>
 #include <Ticker.h>
+#include <SoftwareSerial.h>
 
 ESP8266WebServer server(80);
 WebSocketsServer webSocket(81);
 Ticker timer;
 File fsUploadFile;
+SoftwareSerial wemosSerial(D7, D8); // RX, TX
 
+const byte numChars = 32;
+char receivedChars[numChars];   // an array to store the received data
+boolean newData = false;
+int myInt = 999;
+
+int sensor1 = 0;
+
+int sensorData[8];
+int number = 0;
 //-------------------------------------------------------------------------------------------SETUP-------------------------------------------------------------------------------------------
 
 void setup() {
@@ -22,7 +33,8 @@ void setup() {
   setupFSBrowser();
   startWebSocket();
   startSpiffs();
-  timer.attach(5, getData);
+  setupSerialCom();
+  
 }
 
 //-------------------------------------------------------------------------------------------LOOP-------------------------------------------------------------------------------------------
@@ -31,25 +43,59 @@ void loop() {
   ArduinoOTA.handle();
   webSocket.loop();
   server.handleClient();
-}
-
-//-------------------------------------------------------------------------------------------getData-------------------------------------------------------------------------------------------
-
-void getData(){
-  long rssi = WiFi.RSSI();
-  Serial.println(rssi);
-  File f = SPIFFS.open("/data.txt", "w");
-  if (!f) {
-      Serial.println("file open failed");
+  recieveSerialData();
+  if(number==0){
+    Serial.println(getSpiffsData(1));
+    //sendSensorData(1);
+    number++;
   }
-  f.println(rssi);
-  f.close();
-  String json = "{\"value\":";
-  json += rssi;
-  json += "}";
-  webSocket.broadcastTXT(json.c_str(), json.length());
 }
 
+//-------------------------------------------------------------------------------------------saveData,getSpiffsData-------------------------------------------------------------------------------------------
+
+void saveData(){
+  File f = SPIFFS.open("/data.txt", "a");
+  if(!f) {
+    Serial.println("failed to save data to spiffs");  
+  }
+  for(int i = 0; i < 7; ++i){
+    f.print(sensorData[i]);
+    f.print(',');
+  }
+  f.println(sensorData[7]);
+  f.close();
+  /*
+  f = SPIFFS.open("/data.txt", "r");
+  while(f.available()){
+    Serial.write(f.read());
+  }
+  f.close();*/
+}
+/*
+ * Visszaadja egy String-be a paraméterként megadott szenzornak a Spiffs-ben tárolt értékeit
+ */
+String getSpiffsData(int sensor){
+  String result;
+  File f = SPIFFS.open("/data.txt", "r");
+  if(!f) {
+    Serial.println("failed to save data to spiffs");  
+  }
+  while(f.available()>0){
+    for(int i=1; i<sensor;++i){
+      f.find(',');
+    }
+    if(sensor!=8){
+      result += f.readStringUntil(',');
+      result += ",";
+      f.find('\n');
+    }
+    else{
+      result += f.readStringUntil('\n');
+      result += ",";
+    }
+  }
+  return result;
+}
 //-------------------------------------------------------------------------------------------startWIFI-------------------------------------------------------------------------------------------
 
 void startWifi() {
@@ -112,11 +158,39 @@ void startWebSocket() {
 
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t lenght) { // When a WebSocket message is received
   if(type == WStype_TEXT){
-    float dataRate = (float) atof((const char *) &payload[0]);
-    timer.detach();
-    timer.attach(dataRate, getData);
+    if((char)payload[0] == 's'){
+      wemosSerial.print((char) payload[1]);
+      Serial.print((char) payload[1]);
+    }
+    else if((char)payload[0] == 'g'){
+      sendSensorData(1);
+    }
   }
 }
+
+void sendSensorData(int sensor){
+  String data = getSpiffsData(sensor);
+  String tmp;
+  String json;
+  while(data.indexOf(',')>0){
+    tmp = data.substring(0, data.indexOf(','));
+    json = "{\"value\":";
+    json += tmp;
+    json += "}";
+    webSocket.broadcastTXT(json.c_str(), json.length());
+    data = data.substring(data.indexOf(',')+1);
+  }
+  webSocket.broadcastTXT(data.c_str(), data.length());
+}
+
+void getData(){
+  String json = "{\"value\":";
+  json += sensorData[0];
+  json += "}";
+  webSocket.broadcastTXT(json.c_str(), json.length());
+}
+
+    
 
 //-------------------------------------------------------------------------------------------startSpiffs-------------------------------------------------------------------------------------------
 
@@ -177,9 +251,12 @@ String getContentType(String filename) {
 bool handleFileRead(String path) {
   Serial.println("handleFileRead: " + path);
   // handling different URIs
-  if (path.endsWith("/")) {
+  if (path.endsWith("/"))
     path += "chart.html";
-  }
+  if (path.endsWith("/MainPage"))
+    path += "MainPage.html";
+  if (path.endsWith("/SensorChart"))
+    path += "SensorChart.html";
   String contentType = getContentType(path);
   String pathWithGz = path + ".gz";
   if (SPIFFS.exists(pathWithGz) || SPIFFS.exists(path)) {
@@ -193,3 +270,56 @@ bool handleFileRead(String path) {
   }
   return false;
 }
+
+//-------------------------------------------------------------------------------------------SerialCom.WithArduinoNano-------------------------------------------------------------------------------------------
+
+void setupSerialCom(){
+  wemosSerial.begin(115200);
+  pinMode(D7,INPUT);
+  pinMode(D8,OUTPUT);
+}
+
+void recieveSerialData(){
+    static byte ndx = 0;
+    char endMarker = '\n';
+    char rc;
+    
+    while (wemosSerial.available() > 0 && newData == false) {
+        rc = wemosSerial.read();
+
+        if (rc != endMarker) {
+            receivedChars[ndx] = rc;
+            ndx++;
+            if (ndx >= numChars) {
+                ndx = numChars - 1;
+            }
+        }
+        else {
+            receivedChars[ndx] = '\0'; // terminate the string
+            ndx = 0;
+            newData = true;
+        }
+    }
+    if (newData == true) {
+        Serial.print("This just in ... ");
+        Serial.println(receivedChars);
+        getSensorData(receivedChars);
+        //saveData();//SPIFFSBE kiírás
+        newData = false;
+    }
+}
+
+void getSensorData(char *str){
+  String data(str);
+  for(int i = 0; i < 7; ++i){
+    String substr = data.substring(0, data.indexOf(','));
+    sensorData[i] = substr.toInt();
+    data = data.substring(data.indexOf(',')+1);
+  }
+  sensorData[7] = data.toInt();
+  /*for(int k = 0; k < 8; ++k){
+    Serial.println(sensorData[k]);
+  }*/
+}
+
+///////////////////////////////////////////
