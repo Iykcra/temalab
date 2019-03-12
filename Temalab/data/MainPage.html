@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+</head>
+<body onload="javascript:init()">
+<script>
+var webSocket;
+
+function init(){
+	webSocket = new WebSocket('ws://' + window.location.hostname + ':81/');
+}
+
+function sendCheckboxStatus(cb){
+    if(cb.checked == false){
+		webSocket.send('s' + cb.id);
+		cb.checked = false;
+		console.log("checkbox-off");
+	}
+	else{
+		webSocket.send('s' + cb.id);
+		cb.checked = true;
+		console.log("checkbox-on");
+	}
+}
+</script>
+
+  <input type="checkbox" id="1" onclick="sendCheckboxStatus(this);" value"0"/> Sensor 1<br>
+  <input type="checkbox" id="2" onclick="sendCheckboxStatus(this);" value"0"/> Sensor 2<br>
+  <input type="checkbox" id="3" onclick="sendCheckboxStatus(this);" value"0"/> Sensor 3<br>
+  <input type="checkbox" id="4" onclick="sendCheckboxStatus(this);" value"0"/> Sensor 4<br>
+  <input type="checkbox" id="5" onclick="sendCheckboxStatus(this);" value"0"/> Sensor 5<br>
+  <input type="checkbox" id="6" onclick="sendCheckboxStatus(this);" value"0"/> Sensor 6<br>
+  <input type="checkbox" id="7" onclick="sendCheckboxStatus(this);" value"0"/> Sensor 7<br>
+  <input type="checkbox" id="8" onclick="sendCheckboxStatus(this);" value"0"/> Sensor 8<br>
+</body>
+</html>

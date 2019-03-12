@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script type="text/javascript" src="Chart.bundle.js"></script>
+</head>
+<body onload="javascript:init()">
+<div>
+<canvas id="line-chart" width="800" height="450"></canvas>
+</div>
+<script>
+  var webSocket;
+  var dataPlot;
+  function addData(label, data) {
+    dataPlot.data.labels.push(label);
+    dataPlot.data.datasets[0].data.push(data);
+    dataPlot.update();
+  }
+  function init(){
+    webSocket = new WebSocket('ws://' + window.location.hostname + ':81/');
+    dataPlot = new Chart(document.getElementById("line-chart"), {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          data: [],
+          label: "RSSI (dBm)",
+          borderColor: "3e95cd",
+          fill: false
+        }]
+      }
+    });
+    webSocket.onmessage = function(event){
+      var data = JSON.parse(event.data);
+      addData("timestamp", data.value);
+    }
+	webSocket.send('g');
+  }
+</script>
+</body>
+</html>
